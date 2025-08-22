@@ -1,6 +1,9 @@
+import "dotenv/config";
 import User from "../model/User.model.js";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 const registerUser = async (req, res) => {
   const { name, email, password } = req.body;
@@ -46,13 +49,13 @@ const registerUser = async (req, res) => {
       },
     });
 
+    const verifyUrl = `${process.env.BASE_URL}/api/v1/users/register/${token}`;
     const mailOption = {
       from: process.env.MAILTRAP_SENDEREMAIL,
       to: user.email,
       subject: "Verify ✔ your email",
-      text: `Please click on the following link:
-      ${process.env.BASE_URL}/api/v1/users/register/${token}
-      `,
+      text: `Please click on the following link: ${verifyUrl}`,
+      html: `<p>Please verify your email by clicking <a href="${verifyUrl}">this link</a>.</p>`,
     };
 
     await transporter.sendMail(mailOption);
@@ -91,4 +94,66 @@ const verifyUser = async (req, res) => {
   await user.save();
 };
 
-export { registerUser, verifyUser };
+const login = async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({
+      message: "All fields are required",
+    });
+  }
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.status(400).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    if (!user.isVerified) {
+      return res.status(403).json({
+        message: "Please verify your email",
+      });
+    }
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: process.env.JWT_EXPIRY,
+    });
+
+    const cookieOptions = {
+      httpOnly: true,
+      secure: true,
+      maxAge: 24 * 60 * 60 * 1000,
+    };
+
+    res.cookie("token", token, cookieOptions);
+
+    res.status(200).json({
+      success: true,
+      message: "Login successful",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    res.status(400).json({
+      message: "Error logging in",
+      err,
+      success: false,
+    });
+  }
+};
+
+export { registerUser, verifyUser, login };
