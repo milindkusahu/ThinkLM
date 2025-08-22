@@ -3,6 +3,8 @@ import "dotenv/config";
 import cors from "cors";
 import db from "./utils/db.js";
 
+import userRoutes from "./routes/user.routes.js";
+
 const app = express();
 
 app.use(
@@ -19,9 +21,8 @@ app.use(express.urlencoded({ extended: true }));
 
 const port = process.env.PORT || 3000;
 
-app.get("/", (req, res) => {
-  res.send("Hello World");
-});
+// user routes
+app.use("/api/v1/users/", userRoutes);
 
 app.listen(port, () => {
   console.log(`✅ Server is listening at PORT: ${port}`);
