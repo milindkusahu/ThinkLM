@@ -49,7 +49,7 @@ const registerUser = async (req, res) => {
       },
     });
 
-    const verifyUrl = `${process.env.BASE_URL}/api/v1/users/register/${token}`;
+    const verifyUrl = `${process.env.BASE_URL}/api/v1/users/verify/${token}`;
     const mailOption = {
       from: process.env.MAILTRAP_SENDEREMAIL,
       to: user.email,
@@ -81,17 +81,30 @@ const verifyUser = async (req, res) => {
     });
   }
 
-  const user = await User.findOne({ verificationToken: token });
+  try {
+    const user = await User.findOne({ verificationToken: token });
 
-  if (!user) {
-    return res.status(400).json({
-      message: "Invalid token",
+    if (!user) {
+      return res.status(400).json({
+        message: "Invalid token",
+      });
+    }
+
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    await user.save();
+
+    res.status(200).json({
+      message: "User verified successfully",
+      success: true,
+    });
+  } catch (err) {
+    res.status(400).json({
+      message: "User not registered",
+      err,
+      success: false,
     });
   }
-
-  user.isVerified = true;
-  user.verificationToken = undefined;
-  await user.save();
 };
 
 const login = async (req, res) => {
