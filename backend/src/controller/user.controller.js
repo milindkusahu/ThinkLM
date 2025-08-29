@@ -1,9 +1,14 @@
 import "dotenv/config";
 import User from "../model/User.model.js";
+import Notebook from "../model/Notebook.model.js";
+import Content from "../model/Content.model.js";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { deleteCollection } from "../services/qdrant.service.js";
+import fs from "fs/promises";
+import path from "path";
 
 const registerUser = async (req, res) => {
   const { name, email, password } = req.body;
@@ -49,7 +54,9 @@ const registerUser = async (req, res) => {
       },
     });
 
-    const verifyUrl = `${process.env.BASE_URL}/api/v1/users/verify/${token}`;
+    const verifyUrl = `${
+      process.env.FRONTEND_URL || "http://localhost:5173"
+    }/verify/${token}`;
     const mailOption = {
       from: process.env.MAILTRAP_SENDEREMAIL,
       to: user.email,
@@ -193,6 +200,188 @@ const getProfile = async (req, res) => {
   }
 };
 
+const updateProfile = async (req, res) => {
+  try {
+    const { name } = req.body;
+    const userId = req.user.id;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Name is required",
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        name: name.trim(),
+      },
+      { new: true, runValidators: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      user,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Error updating profile",
+      error: err.message,
+    });
+  }
+};
+
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password and new password are required",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 8 characters long",
+      });
+    }
+
+    // Get user with password field
+    const user = await User.findById(userId).select("+password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password
+    );
+
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password is incorrect",
+      });
+    }
+
+    // Update password (will be hashed by pre-save middleware)
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Error changing password",
+      error: err.message,
+    });
+  }
+};
+
+const deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get user to confirm existence
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const contents = await Content.find({ userId });
+
+    // Delete all Qdrant collections
+    for (const content of contents) {
+      if (content.qdrantCollectionName) {
+        try {
+          await deleteCollection(content._id);
+        } catch (error) {
+          console.error(
+            `Failed to delete Qdrant collection for content ${content._id}:`,
+            error
+          );
+          // Continue with deletion even if Qdrant cleanup fails
+        }
+      }
+    }
+
+    // Delete all uploaded files
+    for (const content of contents) {
+      if (content.sourceType === "file" && content.sourceData.filePath) {
+        try {
+          await fs.unlink(content.sourceData.filePath);
+        } catch (error) {
+          console.log(
+            `File already deleted or not found: ${content.sourceData.filePath}`
+          );
+        }
+      }
+    }
+
+    // Delete user's upload directory
+    const uploadDir = path.join("uploads", `user_${userId}`);
+    try {
+      await fs.rm(uploadDir, { recursive: true, force: true });
+    } catch (error) {
+      console.log(
+        `Upload directory not found or already deleted: ${uploadDir}`
+      );
+    }
+
+    // Delete all contents
+    await Content.deleteMany({ userId });
+
+    // Delete all notebooks
+    await Notebook.deleteMany({ userId });
+
+    // Finally, delete the user
+    await User.findByIdAndDelete(userId);
+
+    // Clear the authentication cookie
+    res.cookie("token", null, {
+      expires: new Date(Date.now()),
+      httpOnly: true,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Account deleted successfully",
+    });
+  } catch (err) {
+    console.error("Error deleting account:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error deleting account",
+      error: err.message,
+    });
+  }
+};
+
 const logout = async (req, res) => {
   try {
     res.cookie("token", null, {
@@ -249,7 +438,9 @@ const forgotPassword = async (req, res) => {
       },
     });
 
-    const resetUrl = `${process.env.BASE_URL}/api/v1/users/reset-password/${resetToken}`;
+    const resetUrl = `${
+      process.env.FRONTEND_URL || "http://localhost:5173"
+    }/reset-password/${resetToken}`;
     const mailOption = {
       from: process.env.MAILTRAP_SENDEREMAIL,
       to: user.email,
@@ -317,12 +508,46 @@ const resetPassword = async (req, res) => {
   }
 };
 
+const getUserStats = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findById(userId).select("credits dataSourcesCount");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      stats: {
+        credits: user.credits,
+        dataSourcesCount: user.dataSourcesCount,
+        maxDataSources: 20,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching user stats",
+      error: error.message,
+    });
+  }
+};
+
 export {
   registerUser,
   verifyUser,
   login,
   getProfile,
+  updateProfile,
+  changePassword,
+  deleteAccount,
   logout,
   forgotPassword,
   resetPassword,
+  getUserStats,
 };
