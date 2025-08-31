@@ -8,7 +8,13 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js"
   },
-  "keywords": [],
+  "keywords": [
+    "RAG",
+    "AI",
+    "OpenAI",
+    "Vector Database",
+    "LangChain"
+  ],
   "author": "Milind Kumar Sahu",
   "license": "ISC",
   "dependencies": {
@@ -16,6 +22,7 @@
     "@langchain/core": "^0.3.72",
     "@langchain/openai": "^0.6.9",
     "@langchain/qdrant": "^0.1.3",
+    "@langchain/textsplitters": "^0.1.0",
     "bcryptjs": "^3.0.2",
     "cheerio": "^1.1.2",
     "cookie-parser": "^1.4.7",
@@ -23,9 +30,13 @@
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "langchain": "^0.3.31",
     "mongoose": "^8.17.2",
+    "multer": "^2.0.2",
     "nodemailer": "^7.0.5",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "youtube-transcript": "^1.2.1",
+    "youtubei.js": "^15.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
